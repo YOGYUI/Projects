@@ -5,7 +5,8 @@ if __name__ == '__main__':
     from Include import WebBrowserWindow
 
     maximized = False
-    url_ = None
+    # url_ = 'home'
+    url_ = 'about:blank'
     for argv in sys.argv:
         if '--window_maximized' in argv:
             splt = argv.split('=')
@@ -20,7 +21,7 @@ if __name__ == '__main__':
     if maximized:
         mainwnd.setWindowState(Qt.WindowMaximized)
     else:
-        mainwnd.resize(800, 800)
+        mainwnd.resize(1024, 1024)
     mainwnd.show()
     app.exec_()
     QApplication.quit()

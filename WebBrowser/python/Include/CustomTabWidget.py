@@ -4,23 +4,47 @@
 # Author       : Yogyui
 # Description  : Customize tab widget and tab bar
 # -------------------------------------------------------------------------------------------------------------------- #
-from PyQt5.QtCore import Qt, pyqtSignal, QSize, QPoint
-from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QTabBar, QTabWidget, QPushButton, QWidget
+from PyQt5.QtCore import Qt, pyqtSignal, QSize, QPoint, QRect
+from PyQt5.QtGui import QIcon, QPaintEvent
+from PyQt5.QtWidgets import QTabBar, QTabWidget, QPushButton, QWidget, QStylePainter, QStyleOptionTab, QStyle
 from PyQt5.QtWidgets import QMenu
-from .Common import makeQAction
+from Common import makeQAction
 
 
 class CustomTabBar(QTabBar):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
+    """
+    def paintEvent(self, a0: QPaintEvent) -> None:
+        # https://stackoverflow.com/questions/3607709/how-to-change-text-alignment-in-qtabwidget
+        painter = QStylePainter(self)
+        option = QStyleOptionTab()
+        ico_rect_size = 32
+        ico_size = 28
 
+        print(option, str(option))
+        for index in range(self.count()):
+            self.initStyleOption(option, index)
+            tabRect = self.tabRect(index)
+
+            icon = self.tabIcon(index)
+            iconrect = QRect(tabRect.left(), tabRect.top(), ico_rect_size, ico_rect_size)
+            pixmap = icon.pixmap(icon.actualSize(QSize(ico_size, ico_size)))
+            painter.drawPixmap(iconrect, pixmap)
+
+            tabRect.setLeft(tabRect.left() + ico_rect_size)
+            painter.drawControl(QStyle.CE_TabBarTabShape, option)
+            painter.drawText(tabRect, Qt.AlignVCenter | Qt.TextDontClip, self.tabText(index))
+    """
     def tabSizeHint(self, index: int) -> QSize:
         size = super().tabSizeHint(index)
         add_btn_width = 36
         parent_width = self.parent().width()
         if index == self.count() - 1:
-            width = add_btn_width
+            if self.count() == 1:
+                width = add_btn_width + 14
+            else:
+                width = add_btn_width
         else:
             width_max = 240
             if (self.count() - 1) * width_max < parent_width:
@@ -46,8 +70,8 @@ class CustomTabWidget(QTabWidget):
         btn = QPushButton()
         btn.setIcon(QIcon('./Resource/add.png'))
         btn.setFlat(True)
-        btn.setFixedSize(16, 16)
-        btn.setIconSize(QSize(14, 14))
+        btn.setIconSize(QSize(18, 16))
+        btn.setToolTip('Add New Tab')
         btn.clicked.connect(lambda: self.sig_add_tab.emit())
 
         self._defaultWidget = QWidget()
@@ -59,8 +83,8 @@ class CustomTabWidget(QTabWidget):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.showContextMenu)
 
-        # stylesheet = "QTabBar::tab:!selected {border: 0px; padding: 2px;}"
-        stylesheet = "QTabBar::tab {text-align: left;}"
+        stylesheet = "QTabBar::tab {height: 32px; font: 12px;}\n"
+        stylesheet += "QTabBar::tab:!selected {border: 0px; margin-left: 8px;}\n"
         self.setStyleSheet(stylesheet)
 
     def onTabMoved(self):
@@ -78,7 +102,7 @@ class CustomTabWidget(QTabWidget):
         menu.addAction(menuAddtab)
         menuNewWnd = makeQAction(parent=self, text='Move to New Window',
                                  triggered=lambda: self.sig_new_window.emit(index),
-                                 enabled=index >= 0)
+                                 enabled=index >= 0 and self.count() > 2)
         menu.addAction(menuNewWnd)
         menu.addSeparator()
         menuCloseTab = makeQAction(parent=self, text='Close',

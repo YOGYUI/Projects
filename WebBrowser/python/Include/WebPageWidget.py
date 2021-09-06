@@ -6,11 +6,11 @@
 # -------------------------------------------------------------------------------------------------------------------- #
 import os
 from typing import Union
-from PyQt5.QtCore import Qt, QUrl, QSize, QObject, QEvent, pyqtSignal
+from PyQt5.QtCore import Qt, QUrl, QObject, QEvent, pyqtSignal, QVariant
 from PyQt5.QtGui import QIcon, QKeyEvent, QMouseEvent
-from PyQt5.QtWidgets import QWidget, QLineEdit, QPushButton
-from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QSizePolicy, QApplication
-from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineHistory, QWebEnginePage
+from PyQt5.QtWidgets import QWidget
+from PyQt5.QtWidgets import QVBoxLayout, QApplication
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 
 
 class WebView(QWebEngineView):
@@ -76,23 +76,21 @@ class WebPageWidget(QWidget):
 
     sig_page_icon = pyqtSignal(QIcon)
     sig_page_title = pyqtSignal(str)
+    sig_page_url = pyqtSignal(str)
+    sig_load_started = pyqtSignal()
+    sig_load_finished = pyqtSignal()
     sig_new_tab = pyqtSignal(object)
     sig_new_window = pyqtSignal(object)
     sig_close = pyqtSignal(object)
+    sig_home = pyqtSignal()
+    sig_edit_url_focus = pyqtSignal()
+    sig_js_result = pyqtSignal(object)
 
     def __init__(self, parent=None, url: Union[str, QUrl] = 'about:blank', view: WebView = None):
         super().__init__(parent=parent)
         path_ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if os.getcwd() != path_:
             os.chdir(path_)
-        self._editUrl = QLineEdit()
-        self._btnGoBackward = QPushButton()
-        self._btnGoForward = QPushButton()
-        self._btnStopRefresh = QPushButton()
-        self._iconRefresh = QIcon('./Resource/reload.png')
-        self._iconStop = QIcon('./Resource/cancel.png')
-        self._btnZoomIn = QPushButton()
-        self._btnZoomOut = QPushButton()
         self._webview = WebView() if view is None else view
         self.initControl()
         self.initLayout()
@@ -103,56 +101,14 @@ class WebPageWidget(QWidget):
 
     def initLayout(self):
         vbox = QVBoxLayout(self)
-        vbox.setContentsMargins(0, 4, 0, 0)
+        vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(4)
-
-        subwgt = QWidget()
-        subwgt.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
-        hbox = QHBoxLayout(subwgt)
-        hbox.setContentsMargins(4, 0, 4, 0)
-        hbox.setSpacing(4)
-        hbox.addWidget(self._btnGoBackward)
-        hbox.addWidget(self._btnGoForward)
-        hbox.addWidget(self._btnStopRefresh)
-        hbox.addWidget(self._editUrl)
-        hbox.addWidget(self._btnZoomIn)
-        hbox.addWidget(self._btnZoomOut)
-        vbox.addWidget(subwgt)
         vbox.addWidget(self._webview)
 
     def initControl(self):
-        self._editUrl.returnPressed.connect(self.onEditUrlReturnPressed)
         self.setWebViewSignals()
         self._webview.titleChanged.connect(lambda x: self.sig_page_title.emit(x))
         self._webview.iconChanged.connect(lambda x: self.sig_page_icon.emit(x))
-        self._btnGoBackward.setEnabled(False)
-        self._btnGoBackward.clicked.connect(lambda: self._webview.back())
-        self._btnGoBackward.setIcon(QIcon('./Resource/previous.png'))
-        self._btnGoBackward.setFlat(True)
-        self._btnGoBackward.setIconSize(QSize(20, 20))
-        self._btnGoBackward.setFixedSize(QSize(24, 20))
-        self._btnGoForward.setEnabled(False)
-        self._btnGoForward.clicked.connect(lambda: self._webview.forward())
-        self._btnGoForward.setIcon(QIcon('./Resource/forward.png'))
-        self._btnGoForward.setFlat(True)
-        self._btnGoForward.setIconSize(QSize(20, 20))
-        self._btnGoForward.setFixedSize(QSize(24, 20))
-        self._btnStopRefresh.setEnabled(False)
-        self._btnStopRefresh.clicked.connect(self.onClickBtnStopRefresh)
-        self._btnStopRefresh.setIcon(self._iconRefresh)
-        self._btnStopRefresh.setFlat(True)
-        self._btnStopRefresh.setIconSize(QSize(20, 20))
-        self._btnStopRefresh.setFixedSize(QSize(24, 20))
-        self._btnZoomIn.clicked.connect(self.onClickBtnZoomIn)
-        self._btnZoomIn.setIcon(QIcon('./Resource/zoomin.png'))
-        self._btnZoomIn.setFlat(True)
-        self._btnZoomIn.setIconSize(QSize(20, 20))
-        self._btnZoomIn.setFixedSize(QSize(24, 20))
-        self._btnZoomOut.clicked.connect(self.onClickBtnZoomOut)
-        self._btnZoomOut.setIcon(QIcon('./Resource/zoomout.png'))
-        self._btnZoomOut.setFlat(True)
-        self._btnZoomOut.setIconSize(QSize(20, 20))
-        self._btnZoomOut.setFixedSize(QSize(24, 20))
 
     def setWebViewSignals(self):
         self._webview.loadStarted.connect(self.onWebViewLoadStarted)
@@ -167,14 +123,9 @@ class WebPageWidget(QWidget):
         else:
             self._webview.load(QUrl(url))
 
-    def onEditUrlReturnPressed(self):
-        url = self._editUrl.text()
-        self.load(url)
-
     def onWebViewLoadStarted(self):
         self._is_loading = True
-        self._btnStopRefresh.setEnabled(True)
-        self._btnStopRefresh.setIcon(self._iconStop)
+        self.sig_load_started.emit()
         # self.sig_page_icon.emit(QIcon('./Resource/processing.png'))
 
     def onWebViewLoadProgress(self, progress: int):
@@ -185,12 +136,10 @@ class WebPageWidget(QWidget):
 
     def onWebViewLoadFinished(self, result: bool):
         self._is_loading = False
+        self.sig_load_finished.emit()
+
         url: QUrl = self._webview.url()
-        self._editUrl.setText(url.toString())
-        history: QWebEngineHistory = self._webview.history()
-        self._btnGoBackward.setEnabled(history.canGoBack())
-        self._btnGoForward.setEnabled(history.canGoForward())
-        self._btnStopRefresh.setIcon(self._iconRefresh)
+        self.sig_page_url.emit(url.toString())
         self.sig_page_title.emit(self._webview.title())
         if result:
             self.sig_page_icon.emit(self._webview.icon())
@@ -203,14 +152,6 @@ class WebPageWidget(QWidget):
         else:
             self._webview.reload()
 
-    def onClickBtnZoomIn(self):
-        factor = self._webview.zoomFactor()
-        self._webview.setZoomFactor(factor + 0.1)
-
-    def onClickBtnZoomOut(self):
-        factor = self._webview.zoomFactor()
-        self._webview.setZoomFactor(factor - 0.1)
-
     def keyPressEvent(self, a0: QKeyEvent) -> None:
         modifier = QApplication.keyboardModifiers()
         if a0.key() == Qt.Key_N:
@@ -222,11 +163,13 @@ class WebPageWidget(QWidget):
         elif a0.key() == Qt.Key_W:
             if modifier == Qt.ControlModifier:
                 self.sig_close.emit(self)
+        elif a0.key() == Qt.Key_H:
+            if modifier == Qt.ControlModifier:
+                self.sig_home.emit()
         elif a0.key() == Qt.Key_F5:
             self._webview.reload()
         elif a0.key() == Qt.Key_F6:
-            self._editUrl.setFocus()
-            self._editUrl.selectAll()
+            self.sig_edit_url_focus.emit()
         elif a0.key() == Qt.Key_Escape:
             self._webview.stop()
         elif a0.key() == Qt.Key_Backspace:
@@ -240,6 +183,16 @@ class WebPageWidget(QWidget):
 
     def view(self) -> WebView:
         return self._webview
+
+    def isLoading(self) -> bool:
+        return self.isLoading()
+
+    def runJavaScript(self, script: str):
+        self.view().page().runJavaScript(script, self.jsCallback)
+
+    def jsCallback(self, v: QVariant):
+        print(v, type(v))
+        self.sig_js_result.emit(v)
 
 
 if __name__ == '__main__':
