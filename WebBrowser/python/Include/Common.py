@@ -1,6 +1,7 @@
 import os
 import _io
 import shutil
+from datetime import datetime
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QAction
 import xml.etree.ElementTree as ElementTree
@@ -112,3 +113,43 @@ def writeXmlFile(
             _fp.write('/>\n')
     if level == 0:
         _fp.close()
+
+
+def timestampToString(timestamp: datetime):
+    h = timestamp.hour
+    m = timestamp.minute
+    s = timestamp.second
+    us = timestamp.microsecond
+    return '%02d:%02d:%02d.%06d' % (h, m, s, us)
+
+
+def getCurTimeStr():
+    return '<%s>' % timestampToString(datetime.now())
+
+
+def writeLog(strMsg: str, obj: object = None, logfile: bool = True):
+    """
+    global glob_logger
+    if glob_logger is None:
+        curpath = os.path.dirname(os.path.abspath(__file__))
+        dirpath = os.path.dirname(curpath)
+        logpath = os.path.join(dirpath, 'Log')
+        if not os.path.isdir(logpath):
+            os.mkdir(logpath)
+        logfilepath = os.path.join(logpath, 'Console.log')
+        glob_logger = logging.getLogger('console')
+        fh = logging.handlers.RotatingFileHandler(logfilepath, maxBytes=MAX_SIZE, backupCount=10, encoding='utf-8')
+        formatter = logging.Formatter('[%(asctime)s]%(message)s')
+        fh.setFormatter(formatter)
+        glob_logger.addHandler(fh)
+        glob_logger.setLevel(logging.DEBUG)
+    """
+    strTime = getCurTimeStr()
+    if obj is not None:
+        strObj = ' [%s]' % type(obj).__name__
+    else:
+        strObj = ''
+    print(strTime + strObj + ' ' + strMsg)
+    if logfile:
+        # glob_logger.info(strObj + ' ' + strMsg)
+        pass

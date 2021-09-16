@@ -5,20 +5,36 @@
 # Description  : Implementation of basic web page (viewer) widget
 # -------------------------------------------------------------------------------------------------------------------- #
 import os
+from enum import IntEnum
 from typing import Union
 from PyQt5.QtCore import Qt, QUrl, QObject, QEvent, pyqtSignal, QVariant
-from PyQt5.QtGui import QIcon, QKeyEvent, QMouseEvent
-from PyQt5.QtWidgets import QWidget
+from PyQt5.QtGui import QIcon, QKeyEvent, QMouseEvent, QKeySequence
+from PyQt5.QtWidgets import QWidget, QShortcut
 from PyQt5.QtWidgets import QVBoxLayout, QApplication
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
+
+
+class WebPage(QWebEnginePage):
+    sig_js_console_msg = pyqtSignal(int, str, int, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def javaScriptConsoleMessage(self, level, message: str, lineNumber: int, sourceID: str):
+        # level: 0 = Info, 1 = Warning, 2 = Error
+        self.sig_js_console_msg.emit(int(level), message, lineNumber, sourceID)
 
 
 class WebView(QWebEngineView):
     sig_new_tab = pyqtSignal(QWebEngineView)
     sig_new_window = pyqtSignal(QWebEngineView)
+    sig_js_console_msg = pyqtSignal(int, str, int, str)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        page = WebPage(self)
+        page.sig_js_console_msg.connect(self.sig_js_console_msg.emit)
+        self.setPage(page)
         QApplication.instance().installEventFilter(self)
 
     def load(self, *args):
@@ -72,19 +88,19 @@ class WebView(QWebEngineView):
 
 
 class WebPageWidget(QWidget):
-    _is_loading: bool = False
-
     sig_page_icon = pyqtSignal(QIcon)
     sig_page_title = pyqtSignal(str)
-    sig_page_url = pyqtSignal(str)
-    sig_load_started = pyqtSignal()
-    sig_load_finished = pyqtSignal()
+    sig_load_started = pyqtSignal(str)
+    sig_load_finished = pyqtSignal(bool)
     sig_new_tab = pyqtSignal(object)
     sig_new_window = pyqtSignal(object)
     sig_close = pyqtSignal(object)
     sig_home = pyqtSignal()
+    sig_dev_tool = pyqtSignal()
     sig_edit_url_focus = pyqtSignal()
     sig_js_result = pyqtSignal(object)
+    sig_key_escape = pyqtSignal()
+    sig_js_console_msg = pyqtSignal(int, str, int, str)
 
     def __init__(self, parent=None, url: Union[str, QUrl] = 'about:blank', view: WebView = None):
         super().__init__(parent=parent)
@@ -106,9 +122,10 @@ class WebPageWidget(QWidget):
         vbox.addWidget(self._webview)
 
     def initControl(self):
+        QShortcut(QKeySequence.Cancel, self, self.onShortCutEscape)
         self.setWebViewSignals()
-        self._webview.titleChanged.connect(lambda x: self.sig_page_title.emit(x))
-        self._webview.iconChanged.connect(lambda x: self.sig_page_icon.emit(x))
+        self._webview.titleChanged.connect(self.onWebViewTitleChanged)
+        self._webview.iconChanged.connect(self.onWebViewIconChanged)
 
     def setWebViewSignals(self):
         self._webview.loadStarted.connect(self.onWebViewLoadStarted)
@@ -116,6 +133,7 @@ class WebPageWidget(QWidget):
         self._webview.loadFinished.connect(self.onWebViewLoadFinished)
         self._webview.sig_new_tab.connect(self.sig_new_tab.emit)
         self._webview.sig_new_window.connect(self.sig_new_window.emit)
+        self._webview.sig_js_console_msg.connect(self.sig_js_console_msg.emit)
 
     def load(self, url: Union[str, QUrl]):
         if isinstance(url, QUrl):
@@ -124,8 +142,8 @@ class WebPageWidget(QWidget):
             self._webview.load(QUrl(url))
 
     def onWebViewLoadStarted(self):
-        self._is_loading = True
-        self.sig_load_started.emit()
+        url = self._webview.page().requestedUrl().toString()
+        self.sig_load_started.emit(url)
         # self.sig_page_icon.emit(QIcon('./Resource/processing.png'))
 
     def onWebViewLoadProgress(self, progress: int):
@@ -135,22 +153,15 @@ class WebPageWidget(QWidget):
         """
 
     def onWebViewLoadFinished(self, result: bool):
-        self._is_loading = False
-        self.sig_load_finished.emit()
+        self.sig_load_finished.emit(result)
 
-        url: QUrl = self._webview.url()
-        self.sig_page_url.emit(url.toString())
-        self.sig_page_title.emit(self._webview.title())
-        if result:
-            self.sig_page_icon.emit(self._webview.icon())
-        else:
-            self.sig_page_icon.emit(QIcon('./Resource/warning.png'))
+    def onWebViewTitleChanged(self, title: str):
+        # print('onWebViewTitleChanged')
+        self.sig_page_title.emit(title)
 
-    def onClickBtnStopRefresh(self):
-        if self._is_loading:
-            self._webview.stop()
-        else:
-            self._webview.reload()
+    def onWebViewIconChanged(self, icon: QIcon):
+        # print('onWebViewIconChanged')
+        self.sig_page_icon.emit(icon)
 
     def keyPressEvent(self, a0: QKeyEvent) -> None:
         modifier = QApplication.keyboardModifiers()
@@ -166,14 +177,19 @@ class WebPageWidget(QWidget):
         elif a0.key() == Qt.Key_H:
             if modifier == Qt.ControlModifier:
                 self.sig_home.emit()
+        elif a0.key() == Qt.Key_D:
+            if modifier == Qt.ControlModifier:
+                self.sig_dev_tool.emit()
         elif a0.key() == Qt.Key_F5:
             self._webview.reload()
         elif a0.key() == Qt.Key_F6:
             self.sig_edit_url_focus.emit()
-        elif a0.key() == Qt.Key_Escape:
-            self._webview.stop()
         elif a0.key() == Qt.Key_Backspace:
             self._webview.back()
+
+    def onShortCutEscape(self):
+        self._webview.stop()
+        self.sig_key_escape.emit()
 
     def mousePressEvent(self, a0: QMouseEvent) -> None:
         pass
@@ -184,14 +200,17 @@ class WebPageWidget(QWidget):
     def view(self) -> WebView:
         return self._webview
 
-    def isLoading(self) -> bool:
-        return self.isLoading()
+    def title(self) -> str:
+        return self._webview.title()
+
+    def icon(self) -> QIcon:
+        return self._webview.icon()
 
     def runJavaScript(self, script: str):
         self.view().page().runJavaScript(script, self.jsCallback)
 
     def jsCallback(self, v: QVariant):
-        print(v, type(v))
+        # print(v, type(v))
         self.sig_js_result.emit(v)
 
 

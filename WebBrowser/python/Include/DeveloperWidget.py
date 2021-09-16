@@ -4,19 +4,37 @@
 # Author       : Yogyui
 # Description  : Widget for Developer (Javascript, Page Source)
 # -------------------------------------------------------------------------------------------------------------------- #
-from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import QWidget, QTextEdit, QPushButton, QLineEdit
-from PyQt5.QtWidgets import QVBoxLayout, QGroupBox, QSizePolicy
+from PyQt5.QtCore import pyqtSignal, QTime
+from PyQt5.QtWidgets import QWidget, QTextEdit, QPushButton, QLineEdit, QCheckBox, QSpinBox, QLabel
+from PyQt5.QtWidgets import QVBoxLayout, QGroupBox, QSizePolicy, QHBoxLayout, QTimeEdit
+from Util import BlogAdClickParams
+from ConfigUtil import WebBrowserConfig
 
 
 class DeveloperWidget(QWidget):
     sig_run_js = pyqtSignal(str)
+    sig_start_blog_ad_click = pyqtSignal(BlogAdClickParams)
+    sig_stop_blog_ad_click = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, config: WebBrowserConfig, parent=None):
         super().__init__(parent=parent)
+        self._config = config
         self._editJavaScript = QTextEdit()
         self._btnRunJavaScript = QPushButton('RUN')
         self._editJsResult = QLineEdit()
+        self.btnStartBlogAdClick = QPushButton('START')
+        self.btnStopBlogAdClick = QPushButton('STOP')
+        self._editBlogSiteMapUrl = QLineEdit()
+        self._checkBlogAdSense = QCheckBox('Ad Sense')
+        self._checkBlogAdFit = QCheckBox('Ad Fit')
+        self._spinBlogCount = QSpinBox()
+        self._spinBlogDelay1 = QSpinBox()
+        self._spinBlogDelay2 = QSpinBox()
+        self._spinTimeout = QSpinBox()
+        self._checkBlogRandomSkip = QCheckBox('Random Skip')
+        self._checkApplyTime = QCheckBox('Time')
+        self._teditApplyTimeStart = QTimeEdit()
+        self._teditApplyTimeEnd = QTimeEdit()
         self.initControl()
         self.initLayout()
 
@@ -35,6 +53,73 @@ class DeveloperWidget(QWidget):
         vbox_gr.addWidget(self._editJsResult)
         vbox.addWidget(grbox)
 
+        grbox = QGroupBox('Blog Ad Click')
+        grbox.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+        vbox_gr = QVBoxLayout(grbox)
+        vbox_gr.setContentsMargins(4, 4, 4, 4)
+        vbox_gr.setSpacing(4)
+        vbox_gr.addWidget(self._editBlogSiteMapUrl)
+        subwgt = QWidget()
+        hbox = QHBoxLayout(subwgt)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(4)
+        hbox.addWidget(self._checkBlogAdSense)
+        hbox.addWidget(self._checkBlogAdFit)
+        hbox.addWidget(QWidget())
+        vbox_gr.addWidget(subwgt)
+        subwgt = QWidget()
+        hbox = QHBoxLayout(subwgt)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(4)
+        lbl = QLabel('Count')
+        hbox.addWidget(lbl)
+        hbox.addWidget(self._spinBlogCount)
+        vbox_gr.addWidget(subwgt)
+        subwgt = QWidget()
+        hbox = QHBoxLayout(subwgt)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(4)
+        lbl = QLabel('Delay 1')
+        hbox.addWidget(lbl)
+        hbox.addWidget(self._spinBlogDelay1)
+        vbox_gr.addWidget(subwgt)
+        subwgt = QWidget()
+        hbox = QHBoxLayout(subwgt)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(4)
+        lbl = QLabel('Delay 2')
+        hbox.addWidget(lbl)
+        hbox.addWidget(self._spinBlogDelay2)
+        vbox_gr.addWidget(subwgt)
+        subwgt = QWidget()
+        hbox = QHBoxLayout(subwgt)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(4)
+        lbl = QLabel('Timeout')
+        hbox.addWidget(lbl)
+        hbox.addWidget(self._spinTimeout)
+        vbox_gr.addWidget(subwgt)
+        vbox_gr.addWidget(self._checkBlogRandomSkip)
+        vbox_gr.addWidget(self._checkApplyTime)
+        subwgt = QWidget()
+        hbox = QHBoxLayout(subwgt)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(4)
+        hbox.addWidget(self._teditApplyTimeStart)
+        lbl = QLabel('~')
+        lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
+        hbox.addWidget(lbl)
+        hbox.addWidget(self._teditApplyTimeEnd)
+        vbox_gr.addWidget(subwgt)
+        subwgt = QWidget()
+        hbox = QHBoxLayout(subwgt)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(4)
+        hbox.addWidget(self.btnStartBlogAdClick)
+        hbox.addWidget(self.btnStopBlogAdClick)
+        vbox_gr.addWidget(subwgt)
+        vbox.addWidget(grbox)
+
         vbox.addWidget(QWidget())
 
     def initControl(self):
@@ -42,6 +127,30 @@ class DeveloperWidget(QWidget):
         self._editJavaScript.setLineWrapMode(QTextEdit.FixedPixelWidth)
         self._btnRunJavaScript.clicked.connect(self.onClickBtnRunJavaScript)
         self._editJsResult.setReadOnly(True)
+        self._editBlogSiteMapUrl.setText(self._config.url_blog_sitemap)
+        self._editBlogSiteMapUrl.setPlaceholderText('Blog Sitemap URL')
+        self.btnStartBlogAdClick.clicked.connect(self.onClickBtnStartBlogAdClick)
+        self.btnStopBlogAdClick.clicked.connect(self.onClickBtnStopBlogAdClick)
+        self.btnStopBlogAdClick.setEnabled(False)
+        self._checkBlogAdSense.setChecked(True)
+        self._checkBlogAdSense.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
+        self._checkBlogAdFit.setChecked(True)
+        self._checkBlogAdFit.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
+        self._spinBlogCount.setRange(0, 2147483647)
+        self._spinBlogDelay1.setRange(0, 2147483647)
+        self._spinBlogDelay1.setValue(10)
+        self._spinBlogDelay2.setRange(0, 2147483647)
+        self._spinBlogDelay2.setValue(10)
+        self._spinTimeout.setRange(0, 2147483647)
+        self._spinTimeout.setValue(10)
+        self._checkBlogRandomSkip.setChecked(True)
+        self._checkApplyTime.clicked.connect(self.onClickCheckApplyTime)
+        self._teditApplyTimeStart.setEnabled(False)
+        self._teditApplyTimeStart.setDisplayFormat('HH:mm:ss')
+        self._teditApplyTimeStart.setTime(QTime(10, 0, 0))
+        self._teditApplyTimeEnd.setEnabled(False)
+        self._teditApplyTimeEnd.setDisplayFormat('HH:mm:ss')
+        self._teditApplyTimeEnd.setTime(QTime(21, 0, 0))
 
     def onClickBtnRunJavaScript(self):
         script = self._editJavaScript.toPlainText()
@@ -50,17 +159,27 @@ class DeveloperWidget(QWidget):
     def setJsResult(self, obj: object):
         self._editJsResult.setText(str(obj))
 
+    def onClickBtnStartBlogAdClick(self):
+        params = BlogAdClickParams()
+        params.sitemap_url = self._editBlogSiteMapUrl.text()
+        params.enable_ad_sense = self._checkBlogAdSense.isChecked()
+        params.enable_ad_fit = self._checkBlogAdFit.isChecked()
+        params.visit_count = self._spinBlogCount.value()
+        params.delay_after_visit = self._spinBlogDelay1.value()
+        params.delay_between_ad = self._spinBlogDelay2.value()
+        params.timeout = self._spinTimeout.value()
+        params.random_skip = self._checkBlogRandomSkip.isChecked()
+        params.enable_time_range = self._checkApplyTime.isChecked()
+        params.time_range_start = self._teditApplyTimeStart.time()
+        params.time_range_end = self._teditApplyTimeEnd.time()
+        self.sig_start_blog_ad_click.emit(params)
 
-if __name__ == '__main__':
-    import sys
-    from PyQt5.QtWidgets import QApplication
-    from PyQt5.QtCore import QCoreApplication
+        self._config.url_blog_sitemap = params.sitemap_url
+        self._config.save_to_xml()
 
-    QApplication.setStyle('fusion')
-    app = QCoreApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
-    wgt_ = DeveloperWidget()
-    wgt_.show()
+    def onClickBtnStopBlogAdClick(self):
+        self.sig_stop_blog_ad_click.emit()
 
-    app.exec_()
+    def onClickCheckApplyTime(self):
+        self._teditApplyTimeStart.setEnabled(self._checkApplyTime.isChecked())
+        self._teditApplyTimeEnd.setEnabled(self._checkApplyTime.isChecked())

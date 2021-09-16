@@ -5,25 +5,36 @@
 # Description  : Implementation of web browser window
 # -------------------------------------------------------------------------------------------------------------------- #
 import os
+import pyautogui
 from typing import Union, List
 from functools import partial
-from PyQt5.QtCore import Qt, QSize, QUrl
+from datetime import datetime
+from multiprocessing.connection import Listener
+from PyQt5.QtCore import Qt, QSize, QUrl, QPoint
 from PyQt5.QtGui import QIcon, QCloseEvent, QKeyEvent, QResizeEvent
 from PyQt5.QtWidgets import QMainWindow, QTabBar, QPushButton, QApplication, QWidget, QAction, QSplitter
 from PyQt5.QtWidgets import QMenuBar, QMenu, QMessageBox
+from PyQt5.QtWebEngineWidgets import QWebEngineProfile
 from WebPageWidget import WebPageWidget, WebView
 from CustomTabWidget import CustomTabWidget
 from NavigationWidget import NavigationToolBar
 from BookMarkWidget import BookMarkToolBar, BookMarkManager
 from ConfigUtil import WebBrowserConfig
 from DeveloperWidget import DeveloperWidget
-from Common import makeQAction
+from Common import makeQAction, ensurePathExist, writeLog
+from Util import ThreadBlogAdClick, BlogAdClickParams, ThreadSocketListener, ThreadSocketClient
 
 
 class WebBrowserWindow(QMainWindow):
     _mb_show_navbar: QAction
     _mb_show_bookmark: QAction
     _mb_show_devtool: QAction
+
+    _sock_listener: Union[Listener, None] = None
+
+    _threadBlogAdClick: Union[ThreadBlogAdClick, None] = None
+    _threadSocketListener: Union[ThreadSocketListener, None] = None
+    _threadSocketClient: Union[ThreadSocketClient, None] = None
 
     def __init__(self, parent=None, init_url: Union[str, QUrl, None] = 'about:blank'):
         super().__init__(parent=parent)
@@ -39,7 +50,9 @@ class WebBrowserWindow(QMainWindow):
 
         self._splitter = QSplitter(Qt.Horizontal, self)
         self._tabWidget = CustomTabWidget()
-        self._devWidget = DeveloperWidget()
+        self._devWidget = DeveloperWidget(self._config)
+
+        # self.initSocket()
 
         self.initControl()
         self.initLayout()
@@ -54,6 +67,8 @@ class WebBrowserWindow(QMainWindow):
                 self.addWebPageTab(init_url)
 
     def release(self):
+        # self.releaseSocket()
+        self.stopThreadBlogAdClick()
         self.closeWebPageAll()
         self._config.save_to_xml()
 
@@ -78,6 +93,10 @@ class WebBrowserWindow(QMainWindow):
         self.addToolBarBreak(Qt.TopToolBarArea)
         self.addToolBar(Qt.TopToolBarArea, self._bookmarkBar)
         self._bookmarkBar.sig_navitage.connect(self.onNavBarNavitageUrl)
+        self._bookmarkBar.sig_open_tab.connect(self.addWebPageTab)
+        self._bookmarkBar.sig_open_window.connect(self.openNewWindowUrl)
+        self._bookmarkBar.sig_toggle_show.connect(self.toggleBookMarkBar)
+        self._bookmarkBar.sig_item_changed.connect(self.onBookMarkBarChanged)
 
         self._tabWidget.sig_add_tab.connect(self.addWebPageTab)
         self._tabWidget.sig_new_window.connect(self.onTabNewWindow)
@@ -87,6 +106,8 @@ class WebBrowserWindow(QMainWindow):
         self._tabWidget.currentChanged.connect(self.onTabWidgetCurrentChanged)
 
         self._devWidget.sig_run_js.connect(self.runJavaScript)
+        self._devWidget.sig_start_blog_ad_click.connect(self.startThreadBlogAdClick)
+        self._devWidget.sig_stop_blog_ad_click.connect(self.stopThreadBlogAdClick)
 
     def initMenuBar(self):
         self.setMenuBar(self._menuBar)
@@ -123,6 +144,9 @@ class WebBrowserWindow(QMainWindow):
         curwgt = self._tabWidget.currentWidget()
         if isinstance(curwgt, WebPageWidget):
             curwgt.load(url)
+        else:
+            if self._tabWidget.count() == 1:
+                self.addWebPageTab(url)
 
     def onNavBarGoBackward(self):
         curwgt = self._tabWidget.currentWidget()
@@ -154,11 +178,11 @@ class WebBrowserWindow(QMainWindow):
         if isinstance(curwgt, WebPageWidget):
             url = curwgt.view().url().toString()
             if self._bookMarkManager.isExist(url):
-                self._bookMarkManager.remove(url)
+                self._bookMarkManager.removeBookMark(url)
             else:
                 url_icon = curwgt.view().iconUrl().toString()
                 title = curwgt.view().title()
-                self._bookMarkManager.add(url, title, url_icon)
+                self._bookMarkManager.addBookMark(url, title, url_icon)
             self.refreshNavBarState()
 
     def refreshNavBarState(self):
@@ -195,11 +219,13 @@ class WebBrowserWindow(QMainWindow):
         view.sig_new_window.connect(self.openNewWindow)
         view.sig_close.connect(partial(self.closeWebPageTab, view))
         view.sig_home.connect(partial(self.goHome, view))
-        view.sig_page_url.connect(partial(self.setWebPageUrl, view))
+        view.sig_dev_tool.connect(self.toggleDevTool)
         view.sig_edit_url_focus.connect(self._navBar.setEditUrlFocused)
         view.sig_load_started.connect(partial(self.onPageLoadStarted, view))
         view.sig_load_finished.connect(partial(self.onPageLoadFinished, view))
         view.sig_js_result.connect(self.onJavaScriptResult)
+        view.sig_js_console_msg.connect(self.onPageJavaScriptConsoleMessage)
+        view.sig_key_escape.connect(self.onPressKeyEscape)
 
     def addTabCommon(self, widget: WebPageWidget):
         index = self._tabWidget.count() - 1
@@ -247,21 +273,29 @@ class WebBrowserWindow(QMainWindow):
         index = self._tabWidget.indexOf(view)
         self._tabWidget.setTabIcon(index, icon)
 
-    def setWebPageUrl(self, view: WebPageWidget, url: str):
+    def setWebPageUrl(self, view: WebPageWidget, url: Union[str, QUrl]):
         if self._tabWidget.currentWidget() == view:
+            if isinstance(url, QUrl):
+                url = url.toString()
             self._navBar.editUrl.setText(url)
 
-    def onPageLoadStarted(self, view: WebPageWidget):
+    def onPageLoadStarted(self, view: WebPageWidget, url: str):
         curwgt = self._tabWidget.currentWidget()
         if curwgt == view:
             self._navBar.setIsLoading(True)
+            self._navBar.editUrl.setText(url)
             self.refreshNavBarState()
 
-    def onPageLoadFinished(self, view: WebPageWidget):
+    def onPageLoadFinished(self, view: WebPageWidget, result: bool):
         curwgt = self._tabWidget.currentWidget()
         if curwgt == view:
+            self.setWebPageUrl(view, view.url())
+            if not result:
+                self.setWebPageIcon(view, QIcon('./Resource/warning.png'))
             self._navBar.setIsLoading(False)
             self.refreshNavBarState()
+        if self._threadBlogAdClick is not None:
+            self._threadBlogAdClick.setVisitDone()
 
     def closeEvent(self, a0: QCloseEvent) -> None:
         self.release()
@@ -272,6 +306,11 @@ class WebBrowserWindow(QMainWindow):
         else:
             newwnd = WebBrowserWindow(self, init_url=None)
             newwnd.addWebPageView(view)
+        newwnd.show()
+        newwnd.resize(self.size())
+
+    def openNewWindowUrl(self, url: str):
+        newwnd = WebBrowserWindow(self, init_url=url)
         newwnd.show()
         newwnd.resize(self.size())
 
@@ -294,6 +333,9 @@ class WebBrowserWindow(QMainWindow):
                     self.goHome(curwgt)
                 else:
                     pass
+        elif a0.key() == Qt.Key_D:
+            if modifier == Qt.ControlModifier:
+                self.toggleDevTool()
         elif a0.key() == Qt.Key_F6:
             self._navBar.setEditUrlFocused()
 
@@ -306,6 +348,7 @@ class WebBrowserWindow(QMainWindow):
             self._navBar.editUrl.setText(curwgt.url().toString())
         else:
             self._navBar.editUrl.clear()
+        self.refreshNavBarState()
 
     def onTabNewWindow(self, index: int):
         widget = self._tabWidget.widget(index)
@@ -378,6 +421,173 @@ class WebBrowserWindow(QMainWindow):
 
     def onJavaScriptResult(self, obj: object):
         self._devWidget.setJsResult(obj)
+        if self._threadBlogAdClick is not None:
+            self._threadBlogAdClick.setJavaScriptResult(obj)
+
+    def onPageJavaScriptConsoleMessage(self, level, message: str, lineNumber: int, sourceID: str):
+        print(level, message, lineNumber, sourceID)
+
+    def onPressKeyEscape(self):
+        self.stopThreadBlogAdClick()
+
+    def onBookMarkBarChanged(self):
+        self.sendToServer(self._bookMarkManager.bookmarks)
+
+    def deleteAllCookies(self):
+        QWebEngineProfile().defaultProfile().cookieStore().deleteAllCookies()
+        writeLog('Delete All Cookies', self)
+
+    ####################################################################################################################
+    def startThreadBlogAdClick(self, params: BlogAdClickParams):
+        self.setWindowState(Qt.WindowMaximized)
+        self.closeWebPageAll()
+        self.addWebPageTab()
+        self._devWidget.hide()
+        if self._threadBlogAdClick is None:
+            self._threadBlogAdClick = ThreadBlogAdClick(params, self)
+            self._threadBlogAdClick.sig_started.connect(self.onThreadBlogAdClickStarted)
+            self._threadBlogAdClick.sig_terminated.connect(self.onThreadBlogAdClickTerminated)
+            self._threadBlogAdClick.sig_visit.connect(self.onThreadBlogAdClickVisit)
+            self._threadBlogAdClick.sig_run_js.connect(self.onThreadBlogAdClickRunJS)
+            self._threadBlogAdClick.sig_exception.connect(self.onThreadBlogAdClickException)
+            self._threadBlogAdClick.sig_close_tab.connect(self.onThreadBlogAdClickCloseTab)
+            self._threadBlogAdClick.sig_mouse_move.connect(self.onThreadBlogAdClickMouseMove)
+            self._threadBlogAdClick.sig_check_ad_open.connect(self.onThreadBlogAdClickCheckAdOpen)
+            self._threadBlogAdClick.sig_delete_cookies.connect(self.deleteAllCookies)
+            self._threadBlogAdClick.start()
+
+    def stopThreadBlogAdClick(self):
+        if self._threadBlogAdClick is not None:
+            self._threadBlogAdClick.stop()
+
+    def onThreadBlogAdClickStarted(self):
+        self._devWidget.btnStartBlogAdClick.setEnabled(False)
+        self._devWidget.btnStopBlogAdClick.setEnabled(True)
+
+    def onThreadBlogAdClickTerminated(
+            self,
+            tm_start: datetime,
+            tm_finish: datetime,
+            visit_cnt: int,
+            result: list,
+            avg_visit_time: float
+    ):
+        del self._threadBlogAdClick
+        self._threadBlogAdClick = None
+        self._devWidget.btnStartBlogAdClick.setEnabled(True)
+        self._devWidget.btnStopBlogAdClick.setEnabled(False)
+        self.closeWebPageAll()
+
+        if len(result) > 0:
+            msg = ''
+            for item in result:
+                head = item.get('head')
+                visit = item.get('visit')
+                success = item.get('success')
+                skip = item.get('skip')
+                msg += f'[{head}] {success}/{visit} (Skip={skip})\n'
+            QMessageBox.information(self, 'Blog Ad Click Result', msg)
+
+        curpath = os.path.dirname(os.path.abspath(__file__))
+        logpath = os.path.join(os.path.dirname(curpath), 'Log')
+        ensurePathExist(logpath)
+        logfilepath = os.path.join(logpath, 'BlogAdClick.log')
+        with open(logfilepath, 'a') as fp:
+            fp.write('<{}> ~ <{}>\n'.format(tm_start.strftime('%Y%m%d-%H:%M:%S'),
+                                            tm_finish.strftime('%Y%m%d-%H:%M:%S')))
+            fp.write(f'Total URL Visit: {visit_cnt}\n')
+            fp.write(f'Average Visit Time per Site (sec): {avg_visit_time}\n')
+            for item in result:
+                head = item.get('head')
+                visit = item.get('visit')
+                success = item.get('success')
+                skip = item.get('skip')
+                fp.write('  [{:8s}] Try:{}, Success:{}, Skip:{}\n'.format(head, visit, success, skip))
+            fp.write('\n')
+
+    def onThreadBlogAdClickVisit(self, url: str):
+        curwgt = self._tabWidget.currentWidget()
+        if isinstance(curwgt, WebPageWidget):
+            curwgt.load(url)
+
+    def onThreadBlogAdClickRunJS(self, script: str):
+        self.runJavaScript(script)
+
+    def onThreadBlogAdClickException(self, message: str):
+        QMessageBox.warning(self, 'Blog Ad Click Exception', message)
+
+    def onThreadBlogAdClickCloseTab(self):
+        self.onTabCloseViewOthers(0)
+
+    def onThreadBlogAdClickMouseMove(self, left: float, top: float, width: float, height: float):
+        curwgt = self._tabWidget.currentWidget()
+        if isinstance(curwgt, WebPageWidget):
+            pt = curwgt.mapToGlobal(QPoint(0, 0))
+            x = pt.x() + left + (width * 0.4)
+            y = pt.y() + top + (height / 2)
+            pyautogui.moveTo(int(x), int(y))
+
+    def onThreadBlogAdClickCheckAdOpen(self):
+        if self._tabWidget.count() <= 2:
+            pyautogui.click()
+        else:
+            if self._threadBlogAdClick is not None:
+                self._threadBlogAdClick.setAdOpenDone()
+    ####################################################################################################################
+    # TODO: 최초로 열린 창이 닫기면 서버가 날아가기 때문에 적합한 방법이 아니다...ㅠㅠ
+
+    def initSocket(self):
+        # listener
+        try:
+            self._sock_listener = Listener(('localhost', 12345), authkey=b'YOGYUI')
+            self.startThreadSocketListener()
+        except OSError as e:
+            print(e)
+        except Exception as e:
+            QMessageBox.warning(self, 'Warning', str(e))
+
+        # client
+        self.startThreadSocketClient()
+
+    def releaseSocket(self):
+        self.stopThreadSocketClient()
+        self.stopThreadSocketListener()
+        if self._sock_listener is not None:
+            self._sock_listener.close()
+
+    def startThreadSocketListener(self):
+        if self._threadSocketListener is None:
+            self._threadSocketListener = ThreadSocketListener(listner=self._sock_listener, parent=self)
+            self._threadSocketListener.sig_terminated.connect(self.onThreadSocketListenerTerminated)
+            self._threadSocketListener.start()
+
+    def stopThreadSocketListener(self):
+        if self._threadSocketListener is not None:
+            self._threadSocketListener.stop()
+
+    def onThreadSocketListenerTerminated(self):
+        del self._threadSocketListener
+        self._threadSocketListener = None
+
+    def startThreadSocketClient(self):
+        if self._threadSocketClient is None:
+            self._threadSocketClient = ThreadSocketClient(port=12345, parent=self)
+            self._threadSocketClient.sig_terminated.connect(self.onThreadSocketClientTerminated)
+            self._threadSocketClient.start()
+
+    def stopThreadSocketClient(self):
+        if self._threadSocketClient is not None:
+            self._threadSocketClient.stop()
+
+    def onThreadSocketClientTerminated(self):
+        del self._threadSocketClient
+        self._threadSocketClient = None
+
+    def sendToServer(self, obj: object):
+        if self._threadSocketClient is not None:
+            self._threadSocketClient.send(obj)
+
+    ####################################################################################################################
 
 
 if __name__ == '__main__':

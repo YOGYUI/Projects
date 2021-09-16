@@ -17,6 +17,7 @@ class WebBrowserConfig:
         self.xml_path = os.path.join(configpath, 'config.xml')
 
         self.url_home = 'about:blank'
+        self.url_blog_sitemap = ''
         self.bookmarkManager = bookmarkManager
         self.load_from_xml()
 
@@ -30,13 +31,18 @@ class WebBrowserConfig:
         if node is not None:
             self.url_home = node.text
 
+        node = root.find('blog_sitemap')
+        if node is not None:
+            self.url_blog_sitemap = node.text
+
         node = root.find('bookmarks')
         if node is not None:
             for child in list(node):
-                title = child.tag
-                url = child.attrib.get('url')
-                icon_url = child.attrib.get('icon_url')
-                self.bookmarkManager.add(url, title, icon_url)
+                if child.tag == 'item':
+                    title = child.get('title')
+                    url = child.attrib.get('url')
+                    icon_url = child.attrib.get('icon_url')
+                    self.bookmarkManager.addBookMark(url, title, icon_url)
 
     def save_to_xml(self):
         if os.path.isfile(self.xml_path):
@@ -51,17 +57,26 @@ class WebBrowserConfig:
             root.append(node)
         node.text = self.url_home
 
+        node = root.find('blog_sitemap')
+        if node is None:
+            node = ET.Element('blog_sitemap')
+            root.append(node)
+        node.text = self.url_blog_sitemap
+
         node = root.find('bookmarks')
         if node is None:
             node = ET.Element('bookmarks')
             root.append(node)
 
-            for item in self.bookmarkManager.bookmarks:
-                child = node.find(item.title)
-                if child is None:
-                    child = ET.Element(item.title)
-                    node.append(child)
-                child.attrib['url'] = item.url
-                child.attrib['icon_url'] = item.icon_url
+        for item in self.bookmarkManager.bookmarks:
+            find = list(filter(lambda x: x.tag == 'item' and x.attrib['url'] == item.url, list(node)))
+            if len(find) == 1:
+                child = find[0]
+            else:
+                child = ET.Element('item')
+                node.append(child)
+            child.attrib['title'] = item.title
+            child.attrib['url'] = item.url
+            child.attrib['icon_url'] = item.icon_url
 
         writeXmlFile(root, self.xml_path, backup=False)

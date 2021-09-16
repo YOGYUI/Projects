@@ -1,0 +1,14 @@
+DeviceManager/cpp/.vs
+DeviceManager/cpp/cpp.v12.suo
+DeviceManager/cpp/cpp.sdf
+DeviceManager/cpp/x64/Debug/*.*
+DeviceManager/cpp/cpp/x64/Debug/*.*
+DeviceManager/python/.idea/
+WebBrowser/python/.idea/
+WebBrowser/python/Config/
+WebBrowser/python/Log/
+WebBrowser/python/MakeInstaller/Windows/build
+WebBrowser/python/MakeInstaller/Windows/dist
+WebBrowser/python/MakeInstaller/Windows/*.exe
+WebBrowser/python/Sample/
+*.pyc
